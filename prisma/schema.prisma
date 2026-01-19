@@ -1,0 +1,132 @@
+// This is your Prisma schema file
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-arm64-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Note: User and WishlistItem models removed - data now comes from HCL Commerce API
+
+model Reservation {
+  id                String            @id @default(cuid())
+
+  // User data (from HCL Commerce API)
+  commerceUserId    String            // HCL Commerce user ID
+  phoneNumber       String
+  userName          String?
+
+  // Product data (from HCL Commerce API)
+  productPartNumber String            // Commerce product partNumber/SKU
+  productName       String
+  productBrand      String?
+  productPrice      Decimal?          @db.Decimal(10, 2)
+  productImageUrl   String?
+
+  // Location data
+  shoppingCentre    String
+  storeName         String
+  locationId        String            // Commerce fulfillment center/store ID
+
+  // Status and timestamps
+  status            ReservationStatus @default(PENDING)
+  createdAt         DateTime          @default(now())
+  expiresAt         DateTime
+  confirmedAt       DateTime?
+  cancelledAt       DateTime?
+  completedAt       DateTime?
+  messageId         String?
+  geofenceEventData Json?
+  updatedAt         DateTime          @updatedAt
+
+  @@index([commerceUserId])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([shoppingCentre, storeName])
+  @@index([locationId])
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  DECLINED
+  EXPIRED
+  CANCELLED
+  COMPLETED
+}
+
+model ShoppingCentre {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  geofenceId    String?  @unique
+  address       String?
+  city          String?
+  state         String?
+  zipCode       String?
+  businessHours Json?
+  stores        Store[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([geofenceId])
+}
+
+model Store {
+  id                String          @id @default(cuid())
+  shoppingCentreId  String
+  shoppingCentre    ShoppingCentre  @relation(fields: [shoppingCentreId], references: [id], onDelete: Cascade)
+  name              String
+  location          String?
+  phoneNumber       String?
+  email             String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@unique([shoppingCentreId, name])
+  @@index([shoppingCentreId])
+}
+
+model Offer {
+  id                String   @id @default(cuid())
+  userId            String
+  phoneNumber       String
+  userName          String?
+  productPartNumber String
+  productName       String
+  productBrand      String?
+  productPrice      String?
+  productImageUrl   String?
+  storeName         String
+  shoppingCentre    String
+  locationId        String
+  geofenceEventData Json?
+  createdAt         DateTime @default(now())
+  expiresAt         DateTime // Auto-expire after 1 hour
+
+  @@index([id])
+  @@index([expiresAt])
+}
+
+model Activity {
+  id        String       @id @default(cuid())
+  type      ActivityType
+  data      Json
+  timestamp DateTime     @default(now())
+
+  @@index([type])
+  @@index([timestamp])
+}
+
+enum ActivityType {
+  GEOFENCE_ENTRY
+  WHATSAPP_SENT
+  RESERVATION_CREATED
+  RESERVATION_CONFIRMED
+  RESERVATION_DECLINED
+  SSE_EVENT_SENT
+  CDP_EVENT_TRACKED
+}

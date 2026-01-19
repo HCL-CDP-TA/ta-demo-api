@@ -1,0 +1,201 @@
+{
+  "info": {
+    "name": "TA Demo API",
+    "description": "API for orchestrating geofence-to-WhatsApp-to-reservation demo flow",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "ta-demo-api"
+  },
+  "item": [
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "Geofence Entry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "demo-webhook-secret-2025",
+                "description": "Webhook API key for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user-001\",\n  \"geofenceId\": \"geofence-001\",\n  \"geofenceName\": \"Westfield Mall\",\n  \"phoneNumber\": \"+1-555-0001\",\n  \"timestamp\": \"2025-12-18T12:00:00Z\",\n  \"position\": {\n    \"latitude\": 34.0522,\n    \"longitude\": -118.2437,\n    \"accuracy\": 10\n  },\n  \"metadata\": {\n    \"name\": \"Sarah Johnson\",\n    \"email\": \"sarah.johnson@example.com\"\n  }\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/webhooks/geofence-entry",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "webhooks", "geofence-entry"]
+            },
+            "description": "Receives CDP webhook when a user enters a shopping centre geofence. Creates a pending reservation and sends WhatsApp message with product from user's wishlist."
+          },
+          "response": [
+            {
+              "name": "Success - WhatsApp Sent",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"userId\": \"user-001\",\n  \"geofenceId\": \"geofence-001\",\n  \"geofenceName\": \"Westfield Mall\",\n  \"phoneNumber\": \"+1-555-0001\",\n  \"timestamp\": \"2025-12-18T12:00:00Z\",\n  \"position\": {\n    \"latitude\": 34.0522,\n    \"longitude\": -118.2437,\n    \"accuracy\": 10\n  }\n}"
+                },
+                "url": {
+                  "raw": "http://localhost:3000/api/webhooks/geofence-entry",
+                  "protocol": "http",
+                  "host": ["localhost"],
+                  "port": "3000",
+                  "path": ["api", "webhooks", "geofence-entry"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Geofence entry processed successfully\",\n  \"reservationId\": \"clxyz123456789\",\n  \"whatsappSent\": true\n}"
+            },
+            {
+              "name": "No Wishlist Items",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"userId\": \"user-999\",\n  \"geofenceId\": \"geofence-001\",\n  \"geofenceName\": \"Westfield Mall\",\n  \"phoneNumber\": \"+1-555-9999\",\n  \"timestamp\": \"2025-12-18T12:00:00Z\",\n  \"position\": {\n    \"latitude\": 34.0522,\n    \"longitude\": -118.2437,\n    \"accuracy\": 10\n  }\n}"
+                },
+                "url": {
+                  "raw": "http://localhost:3000/api/webhooks/geofence-entry",
+                  "protocol": "http",
+                  "host": ["localhost"],
+                  "port": "3000",
+                  "path": ["api", "webhooks", "geofence-entry"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"No wishlist items available\",\n  \"reservationId\": null\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "WhatsApp",
+      "item": [
+        {
+          "name": "Button Response",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messageId\": \"2025-12-18T12:00:00.000Z\",\n  \"buttonId\": \"reserve_item\",\n  \"buttonText\": \"Reserve Item\",\n  \"sender\": \"Zara\",\n  \"senderNumber\": \"+1-800-SHOP\",\n  \"payload\": {\n    \"reservationId\": \"clxyz123456789\",\n    \"action\": \"reserve\"\n  }\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/whatsapp/button-response",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "whatsapp", "button-response"]
+            },
+            "description": "Handles button clicks from WhatsApp messages. Confirms or declines reservations and sends SSE events to store associate app."
+          },
+          "response": [
+            {
+              "name": "Reserve Item - Confirmed",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"messageId\": \"2025-12-18T12:00:00.000Z\",\n  \"buttonId\": \"reserve_item\",\n  \"buttonText\": \"Reserve Item\",\n  \"sender\": \"Zara\",\n  \"senderNumber\": \"+1-800-SHOP\",\n  \"payload\": {\n    \"reservationId\": \"clxyz123456789\",\n    \"action\": \"reserve\"\n  }\n}"
+                },
+                "url": {
+                  "raw": "http://localhost:3000/api/whatsapp/button-response",
+                  "protocol": "http",
+                  "host": ["localhost"],
+                  "port": "3000",
+                  "path": ["api", "whatsapp", "button-response"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Reservation confirmed\",\n  \"reservation\": {\n    \"id\": \"clxyz123456789\",\n    \"status\": \"CONFIRMED\"\n  }\n}"
+            },
+            {
+              "name": "No Thanks - Declined",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"messageId\": \"2025-12-18T12:00:00.000Z\",\n  \"buttonId\": \"no_thanks\",\n  \"buttonText\": \"No Thanks\",\n  \"sender\": \"Zara\",\n  \"senderNumber\": \"+1-800-SHOP\",\n  \"payload\": {\n    \"reservationId\": \"clxyz123456789\",\n    \"action\": \"decline\"\n  }\n}"
+                },
+                "url": {
+                  "raw": "http://localhost:3000/api/whatsapp/button-response",
+                  "protocol": "http",
+                  "host": ["localhost"],
+                  "port": "3000",
+                  "path": ["api", "whatsapp", "button-response"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Reservation declined\",\n  \"reservation\": {\n    \"id\": \"clxyz123456789\",\n    \"status\": \"DECLINED\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "webhookApiKey",
+      "value": "demo-webhook-secret-2025",
+      "type": "string"
+    }
+  ]
+}
