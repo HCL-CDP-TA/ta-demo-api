@@ -7,10 +7,11 @@ API for orchestrating geofence-to-WhatsApp-to-reservation demo flow. Acts as the
 This Next.js API enables a seamless customer experience:
 
 1. **Customer enters geofence** → Geofence app triggers API
-2. **API finds wishlist item** → Sends personalized WhatsApp message
-3. **Customer clicks "Reserve"** → Reservation confirmed
-4. **Store associate notified** → Real-time SSE updates
-5. **CDP tracks events** → Complete customer journey captured
+2. **API finds cart item** → Creates offer and sends personalized WhatsApp message
+3. **Customer clicks "Reserve"** → Reservation created and confirmed
+4. **Confirmation sent** → WhatsApp confirmation message (with 2-second delay)
+5. **Store associate notified** → Real-time SSE updates
+6. **CDP tracks events** → Complete customer journey captured
 
 ## Architecture
 
@@ -132,22 +133,25 @@ Receives webhook when a user enters or exits a shopping centre geofence.
 
 **Flow:**
 1. Validates webhook request
-2. Finds existing user in database (gracefully fails if not found)
-3. Retrieves user's wishlist items for the shopping centre
-4. Selects first in-stock item
-5. Creates PENDING reservation (expires COB today)
-6. Sends WhatsApp message via Phone Emulator
+2. Fetches user profile from HCL Commerce API
+3. Retrieves user's shopping cart from Commerce API
+4. Creates Offer record with 1-hour expiry
+5. Sends WhatsApp message via Phone Emulator with offer link
+6. Tracks WhatsApp message sent to CDP
 7. Logs activity to database
 
-> **Note:** CDP tracking is handled elsewhere, not in this endpoint.
+> **Note:** No reservation is created at this point - only an Offer. The reservation is created when the user clicks "Reserve Item".
 
 ---
 
 ### WhatsApp
 
-#### POST `/api/whatsapp/button-response`
+#### POST `/api/whatsapp/button-response?offerId={uuid}`
 
 Handles button clicks from WhatsApp messages sent via the Phone Emulator.
+
+**Query Parameters:**
+- `offerId` (required): UUID of the offer created during geofence event
 
 **Headers:**
 - `Content-Type: application/json`
@@ -155,15 +159,11 @@ Handles button clicks from WhatsApp messages sent via the Phone Emulator.
 **Request Body:**
 ```json
 {
-  "messageId": "2025-12-18T12:00:00.000Z",
+  "messageId": "1768538310088-od2pdc3",
   "buttonId": "reserve_item",
   "buttonText": "Reserve Item",
   "sender": "Zara",
-  "senderNumber": "+1-800-SHOP",
-  "payload": {
-    "reservationId": "clxyz123456789",
-    "action": "reserve"
-  }
+  "senderNumber": "+1-800-SHOP"
 }
 ```
 
@@ -183,27 +183,29 @@ Handles button clicks from WhatsApp messages sent via the Phone Emulator.
 ```json
 {
   "success": true,
-  "message": "Reservation declined",
-  "reservation": {
-    "id": "clxyz123456789",
-    "status": "DECLINED"
-  }
+  "message": "Offer declined"
 }
 ```
 
 **Flow (Reserve Item):**
-1. Finds reservation by messageId or payload.reservationId
-2. Updates reservation status to CONFIRMED
-3. Sends TWO SSE events to Store Associate app:
+1. Extracts offerId from URL query parameter
+2. Looks up Offer from database (returns 404 if expired)
+3. Creates NEW reservation from offer data (status: PENDING)
+4. Immediately confirms reservation (status: CONFIRMED)
+5. Sends TWO SSE events to Store Associate app:
    - `customer_approaching` → Displays VipNotification
    - `item_reserved` → Shows Toast + updates Items on Hold
-4. Tracks "Item Reserved" event to CDP
-5. Logs all activities
+6. Tracks "Item Reserved" event to CDP
+7. Waits 2 seconds (to avoid instant response)
+8. Sends confirmation WhatsApp message to customer
+9. Tracks confirmation message to CDP
+10. Logs all activities
 
 **Flow (No Thanks):**
-1. Updates reservation status to DECLINED
-2. Tracks "Reservation Declined" event to CDP
-3. Logs activity
+1. Extracts offerId from URL query parameter
+2. Looks up Offer from database
+3. Logs offer declined activity (no reservation created)
+4. Tracks "Offer Declined" event to CDP
 
 ---
 
@@ -211,21 +213,29 @@ Handles button clicks from WhatsApp messages sent via the Phone Emulator.
 
 ### Key Models
 
-**User**
-- `id`, `userId`, `phoneNumber`, `name`, `email`
-- Relationships: reservations, wishlists
-
-**Product**
-- `sku`, `name`, `brand`, `price`, `imageUrl`
-- `shoppingCentre`, `storeName`, `storeLocation`
-- `stockQuantity`, `inStock`
-- Support for external API integration (`externalId`, `externalSource`)
+**Offer** (NEW)
+- Temporary offer created when WhatsApp message is sent
+- Contains user info, product details, location data
+- Expires after 1 hour
+- Used to bridge gap between message sent and button click
+- UUID included in WhatsApp button URL as query parameter
 
 **Reservation**
-- Links user to product
+- Stores inline user and product data (no relations to User/Product tables)
+- Fields: `commerceUserId`, `phoneNumber`, `userName`
+- Product data: `productPartNumber`, `productName`, `productBrand`, `productPrice`, `productImageUrl`
+- Location data: `shoppingCentre`, `storeName`, `locationId`
 - Status: PENDING, CONFIRMED, DECLINED, EXPIRED, CANCELLED, COMPLETED
 - Timestamps: createdAt, expiresAt, confirmedAt
 - Stores geofence event data and WhatsApp messageId
+
+**ShoppingCentre**
+- Physical shopping centre locations
+- Name, address, coordinates
+
+**Store**
+- Individual stores within shopping centres
+- Belongs to shopping centre
 
 **Activity**
 - Event logging: GEOFENCE_ENTRY, WHATSAPP_SENT, RESERVATION_CREATED, etc.
@@ -289,20 +299,33 @@ ENABLE_SSE=true
 
 ## Services
 
+### Offer Service (NEW)
+- Creates temporary offers with 1-hour TTL
+- Retrieves offers by ID with expiration check
+- Cleanup of expired offers
+
+### Commerce Service (NEW)
+- Integrates with HCL Commerce API
+- Fetches user profiles with phone numbers
+- Retrieves user shopping carts
+- Checks inventory at specific locations
+- Gets product details by part number
+
 ### WhatsApp Service
-Sends reservation messages to Phone Emulator with interactive buttons.
+- Sends reservation offer messages to Phone Emulator with interactive buttons
+- Sends confirmation messages after reservation confirmed
+- All messages tracked to CDP
 
 ### CDP Service
-Tracks events to HCL CDP using x-api-key authentication.
+- Tracks events to HCL CDP using x-api-key authentication
+- Tracks WhatsApp messages sent (both offer and confirmation)
+- Tracks reservation confirmations and declines
 
 ### SSE Service
 Manages Server-Sent Events connections for real-time updates to Store Associate app.
 
 ### Reservation Service
 CRUD operations for reservations with status management.
-
-### Product Service
-Wishlist queries, product searches, stock management.
 
 ### Activity Service
 Event logging and dashboard statistics.
@@ -395,18 +418,15 @@ curl -X POST http://localhost:3000/api/webhooks/geofence-event \
 
 4. **Test Button Response:**
 ```bash
-curl -X POST http://localhost:3000/api/whatsapp/button-response \
+# Replace {offer-id} with the offerId returned from the geofence event
+curl -X POST "http://localhost:3000/api/whatsapp/button-response?offerId={offer-id}" \
   -H "Content-Type: application/json" \
   -d '{
-    "messageId": "2025-12-18T12:00:00.000Z",
+    "messageId": "1768538310088-od2pdc3",
     "buttonId": "reserve_item",
     "buttonText": "Reserve Item",
     "sender": "Zara",
-    "senderNumber": "+1-800-SHOP",
-    "payload": {
-      "reservationId": "clxyz123456789",
-      "action": "reserve"
-    }
+    "senderNumber": "+1-800-SHOP"
   }'
 ```
 
@@ -427,11 +447,12 @@ ta-demo-api/
 ├── lib/
 │   ├── db.ts
 │   ├── services/
+│   │   ├── offer.service.ts
+│   │   ├── commerce.service.ts
 │   │   ├── whatsapp.service.ts
 │   │   ├── cdp.service.ts
 │   │   ├── sse.service.ts
 │   │   ├── reservation.service.ts
-│   │   ├── product.service.ts
 │   │   └── activity.service.ts
 │   ├── types/
 │   │   ├── cdp.types.ts

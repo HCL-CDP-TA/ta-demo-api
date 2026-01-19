@@ -35,8 +35,9 @@ TA Demo API - A Next.js API for orchestrating geofence-to-WhatsApp-to-reservatio
 - `app/api/` - API route handlers
 - `lib/services/` - Business logic services
   - `commerce.service.ts` - HCL Commerce API integration
+  - `offer.service.ts` - Temporary offer management (1 hour TTL)
   - `reservation.service.ts` - Reservation management
-  - `whatsapp.service.ts` - WhatsApp messaging
+  - `whatsapp.service.ts` - WhatsApp messaging (offer + confirmation)
   - `sse.service.ts` - Server-Sent Events
   - `cdp.service.ts` - CDP tracking
 - `lib/types/` - TypeScript type definitions
@@ -71,13 +72,37 @@ Receives geofence enter/exit events. Fetches user/wishlist data from Commerce AP
 **Flow:**
 1. Validates webhook with `WEBHOOK_API_KEY`
 2. Calls `commerceService.getUserById(user_id)` for phone number
-3. Calls `commerceService.getUserWishlist(user_id)` for wishlist items
-4. Calls `commerceService.checkInventory(partNumbers, locationId)` for stock
-5. Creates reservation with inline user/product data
-6. Sends WhatsApp message with reservation details
+3. Calls `commerceService.getUserCart(user_id)` for cart items
+4. Creates an Offer record in database with UUID (expires in 1 hour)
+5. Sends WhatsApp message with buttons containing `offerId` in URL query parameter
+6. Tracks "WhatsApp Message Sent" event to CDP
+7. Logs activity
 
-### POST `/api/whatsapp/button-response`
+**Note:** No reservation is created at this stage - only an Offer. Reservation is created when user clicks "Reserve Item".
+
+### POST `/api/whatsapp/button-response?offerId={uuid}`
 Handles WhatsApp button clicks (Reserve Item / No Thanks).
+
+**Query Parameters:**
+- `offerId` (required) - UUID of the offer to process
+
+**Flow (Reserve Item):**
+1. Looks up Offer by UUID from database
+2. Validates offer hasn't expired (1 hour TTL)
+3. Creates PENDING reservation from offer data
+4. Immediately confirms reservation
+5. Sends TWO SSE events to Store Associate app:
+   - `customer_approaching` → VipNotification
+   - `item_reserved` → Toast + Items on Hold
+6. Tracks "Item Reserved" to CDP
+7. **Waits 2 seconds**
+8. Sends WhatsApp confirmation message to customer
+9. Tracks "WhatsApp Message Sent" to CDP
+
+**Flow (No Thanks):**
+1. Looks up Offer by UUID
+2. Logs decline activity
+3. Tracks "Offer Declined" to CDP
 
 ### GET `/api/store-associate/events`
 SSE endpoint for real-time updates to Store Associate app.
@@ -145,6 +170,14 @@ ENABLE_SSE=true
 - Reservation model stores inline user/product data (no relations to User/Product tables)
 
 ## Database Schema
+
+**Offer** - Temporary offer storage (expires in 1 hour)
+- `id` (UUID) - Unique identifier included in WhatsApp button URL
+- `userId`, `phoneNumber`, `userName` - User info from Commerce API
+- `productPartNumber`, `productName`, `productBrand`, `productPrice`, `productImageUrl` - Product details
+- `storeName`, `shoppingCentre`, `locationId` - Location info
+- `geofenceEventData` - Original geofence event details
+- `expiresAt` - Auto-expires 1 hour after creation
 
 **Reservation** - Stores reservation with inline user/product data
 - `commerceUserId` - HCL Commerce user ID
