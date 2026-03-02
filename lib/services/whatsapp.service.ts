@@ -36,9 +36,11 @@ export class WhatsAppService {
       return { success: false, error: "WhatsApp is disabled" }
     }
 
+    console.log(params)
+
     const productDisplay = params.productBrand ? `${params.productBrand} ${params.productName}` : params.productName
 
-    const message = `Hi ${params.userName}, ${productDisplay} is in stock at ${params.storeName} in ${params.shoppingCentre}. Would you like to reserve it until COB today?`
+    const message = `Hi ${params.userName}, ${productDisplay} is in stock at ${params.storeName}. Would you like to reserve it until COB today?`
 
     const apiBaseUrl = process.env.API_BASE_URL || process.env.TA_DEMO_API_URL || "http://localhost:3001"
 

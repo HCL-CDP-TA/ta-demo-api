@@ -88,28 +88,41 @@ export class SSEService {
    * Broadcasts an event to all clients matching the filters
    */
   broadcast(event: SSEEvent, filters?: SSEClientFilters): void {
+    console.log(`[SSEService] broadcast() called with filters:`, filters)
+    console.log(`[SSEService] Total clients:`, this.clients.size)
+
     const message = `event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`
     const encoder = new TextEncoder()
 
     let sentCount = 0
+    let skippedCount = 0
 
     for (const client of this.clients.values()) {
+      console.log(`[SSEService] Checking client ${client.id}, client filters: storeId=${client.storeId}, shoppingCentre=${client.shoppingCentre}`)
+
       // Apply filters
-      if (filters?.storeId && client.storeId !== filters.storeId) continue
-      if (filters?.shoppingCentre && client.shoppingCentre !== filters.shoppingCentre) continue
+      if (filters?.storeId && client.storeId !== filters.storeId) {
+        console.log(`[SSEService] Skipping client ${client.id} - storeId filter mismatch`)
+        skippedCount++
+        continue
+      }
+      if (filters?.shoppingCentre && client.shoppingCentre !== filters.shoppingCentre) {
+        console.log(`[SSEService] Skipping client ${client.id} - shoppingCentre filter mismatch`)
+        skippedCount++
+        continue
+      }
 
       try {
         client.controller.enqueue(encoder.encode(message))
         sentCount++
+        console.log(`[SSEService] Sent to client ${client.id}`)
       } catch (error) {
         console.error(`[SSEService] Failed to send to client ${client.id}:`, error)
         this.removeClient(client.id)
       }
     }
 
-    if (sentCount > 0) {
-      console.log(`[SSEService] Broadcast ${event.event} to ${sentCount} client(s)`)
-    }
+    console.log(`[SSEService] Broadcast ${event.event} - sent: ${sentCount}, skipped: ${skippedCount}`)
   }
 
   /**
@@ -121,13 +134,17 @@ export class SSEService {
     phoneNumber: string
     distance: string
     eta: string
+    heading?: string
+    message?: string
     storeId?: string
     shoppingCentre?: string
   }): void {
+    console.log('[SSEService] sendCustomerApproaching called with:', params)
+
     const data: CustomerApproachingEvent = {
       id: crypto.randomUUID(),
-      heading: 'VIP CUSTOMER APPROACHING',
-      message: `High-value customer detected within ${params.distance}ft radius.`,
+      heading: params.heading || 'VIP CUSTOMER APPROACHING',
+      message: params.message || `High-value customer detected within ${params.distance}ft radius.`,
       customerName: params.customerName,
       customerId: params.customerId,
       phoneNumber: params.phoneNumber,
@@ -140,10 +157,9 @@ export class SSEService {
       data
     }
 
-    this.broadcast(event, {
-      storeId: params.storeId,
-      shoppingCentre: params.shoppingCentre
-    })
+    console.log('[SSEService] Broadcasting event:', event)
+    // Broadcast to all clients (no filter)
+    this.broadcast(event)
   }
 
   /**
@@ -167,9 +183,8 @@ export class SSEService {
       data
     }
 
-    this.broadcast(event, {
-      shoppingCentre: reservation.shoppingCentre
-    })
+    // Broadcast to all clients (no filter)
+    this.broadcast(event)
   }
 
   /**
@@ -207,5 +222,13 @@ export class SSEService {
   }
 }
 
-// Export singleton instance
-export const sseService = new SSEService()
+// Export singleton instance using global to ensure single instance across module reloads
+declare global {
+  var __sseService: SSEService | undefined
+}
+
+if (!global.__sseService) {
+  global.__sseService = new SSEService()
+}
+
+export const sseService = global.__sseService

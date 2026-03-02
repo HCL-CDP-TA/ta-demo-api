@@ -9,6 +9,7 @@ if (process.env.COMMERCE_HOST_URL && process.env.NODE_TLS_REJECT_UNAUTHORIZED !=
 
 export interface CommerceUser {
   userId: string
+  logonId?: string
   firstName?: string
   lastName?: string
   phone1?: string
@@ -250,6 +251,7 @@ export class CommerceService {
 
       return {
         userId: user.userId || user.id,
+        logonId: user.logonId,
         firstName: firstName,
         lastName: lastName,
         phone1: phone,
@@ -417,15 +419,24 @@ export class CommerceService {
         return []
       }
 
-      return orderItems.map((item: any) => ({
-        partNumber: item.partNumber || "",
-        productId: item.productId,
-        quantityRequested: item.quantity,
-        name: item.name,
-        thumbnail: item.thumbnail,
-        unitPrice: item.unitPrice,
-        manufacturer: item.manufacturer,
-      }))
+      return orderItems.map((item: any) => {
+        // Log all available fields to understand cart item structure
+        console.log(`[CommerceService] Cart item all fields:`, Object.keys(item))
+        console.log(`[CommerceService] Cart item full data:`, JSON.stringify(item, null, 2))
+
+        // Cart API doesn't include product name - only partNumber and productId
+        // The "description" field is the shipping method, not the product
+        // Product details must be fetched separately using getProductByPartNumber
+        return {
+          partNumber: item.partNumber || "",
+          productId: item.productId,
+          quantityRequested: item.quantity,
+          name: item.catalogEntryDescription || item.productName || "", // Try these fields
+          thumbnail: item.thumbnail,
+          unitPrice: item.unitPrice,
+          manufacturer: item.manufacturer,
+        }
+      })
     } catch (error) {
       console.error(`[CommerceService] Failed to fetch cart for user ${userId}:`, error)
       return []
@@ -476,10 +487,13 @@ export class CommerceService {
   }
 
   /**
-   * Get product details by part number
+   * Get product details by part number or product ID
    * Returns product information including name, price, image
+   *
+   * The cart returns SKU partNumbers, but we need the parent product name.
+   * Strategy: Use transaction API to fetch catalog entry by ID, then get parent if it's a SKU.
    */
-  async getProductByPartNumber(partNumber: string): Promise<{
+  async getProductByPartNumber(partNumber: string, productId?: string): Promise<{
     partNumber: string
     name: string
     brand?: string
@@ -489,22 +503,11 @@ export class CommerceService {
     try {
       await this.initialize()
 
-      console.log(`[CommerceService] Fetching product ${partNumber}`)
+      console.log(`[CommerceService] Fetching product for SKU partNumber: ${partNumber}${productId ? ` (SKU ID: ${productId})` : ""}`)
 
-      // Manually build URL to work around SDK bug
-      const config = this.client.getConfig()
-      const catalogId = config.catalogId || process.env.COMMERCE_CATALOG_ID
-      const contractId = config.contractId || process.env.COMMERCE_CONTRACT_ID
       const langId = "-1"
       const currency = "USD"
-
-      const url = this.buildSearchUrl(
-        `/api/v2/products?storeId=${
-          this.storeId
-        }&catalogId=${catalogId}&contractId=${contractId}&langId=${langId}&currency=${currency}&partNumber=${encodeURIComponent(
-          partNumber,
-        )}`,
-      )
+      const catalogId = this.client.getConfig().catalogId || process.env.COMMERCE_CATALOG_ID
 
       const headers: Record<string, string> = {
         Accept: "application/json",
@@ -518,61 +521,170 @@ export class CommerceService {
         headers["WCTrustedToken"] = tokens.WCTrustedToken
       }
 
-      let response = await fetch(url, {
+      // If we have a productId, try multiple endpoint variations
+      if (productId) {
+        console.log(`[CommerceService] Fetching catalog entry by ID: ${productId}`)
+
+        // Try different endpoint paths that HCL Commerce might use
+        const endpointVariations = [
+          `/store/${this.storeId}/productview/byIds?id=${productId}&langId=${langId}&currency=${currency}&catalogId=${catalogId}`,
+          `/store/${this.storeId}/productview/${productId}?langId=${langId}&currency=${currency}&catalogId=${catalogId}`,
+          `/store/${this.storeId}/catalog/product/${productId}?langId=${langId}&currency=${currency}`,
+        ]
+
+        for (const endpoint of endpointVariations) {
+          const productUrl = this.buildTransactionUrl(endpoint)
+          console.log(`[CommerceService] Trying endpoint: ${productUrl}`)
+
+          let response = await fetch(productUrl, {
+            method: "GET",
+            headers,
+            credentials: "include",
+          })
+
+          if (response.status === 401) {
+            console.warn("[CommerceService] Session expired (401), re-authenticating...")
+            this.initialized = false
+            await this.initialize()
+
+            const newTokens = this.client.getTokens()
+            if (newTokens.WCToken) {
+              headers["WCToken"] = newTokens.WCToken
+            }
+            if (newTokens.WCTrustedToken) {
+              headers["WCTrustedToken"] = newTokens.WCTrustedToken
+            }
+
+            response = await fetch(productUrl, {
+              method: "GET",
+              headers,
+              credentials: "include",
+            })
+          }
+
+          if (response.ok) {
+            const data = await response.json()
+            console.log(`[CommerceService] Success with endpoint: ${endpoint}`)
+            console.log(`[CommerceService] Response data:`, JSON.stringify(data, null, 2))
+
+            // Handle different response structures
+            let catalogEntry = data
+            if (data.catalogEntryView && Array.isArray(data.catalogEntryView)) {
+              catalogEntry = data.catalogEntryView[0]
+            } else if (data.CatalogEntryView && Array.isArray(data.CatalogEntryView)) {
+              catalogEntry = data.CatalogEntryView[0]
+            }
+
+            if (!catalogEntry) {
+              console.warn(`[CommerceService] No catalog entry in response`)
+              continue
+            }
+
+            // Check if this is a SKU with a parent
+            if (catalogEntry.parentCatalogEntryID) {
+              console.log(`[CommerceService] SKU has parent: ${catalogEntry.parentCatalogEntryID}, fetching parent...`)
+
+              // Try the same endpoint variations for the parent
+              for (const parentEndpoint of endpointVariations) {
+                const parentUrl = this.buildTransactionUrl(
+                  parentEndpoint.replace(productId, catalogEntry.parentCatalogEntryID),
+                )
+
+                const parentResponse = await fetch(parentUrl, {
+                  method: "GET",
+                  headers,
+                  credentials: "include",
+                })
+
+                if (parentResponse.ok) {
+                  const parentData = await parentResponse.json()
+                  let parent = parentData
+                  if (parentData.catalogEntryView && Array.isArray(parentData.catalogEntryView)) {
+                    parent = parentData.catalogEntryView[0]
+                  } else if (parentData.CatalogEntryView && Array.isArray(parentData.CatalogEntryView)) {
+                    parent = parentData.CatalogEntryView[0]
+                  }
+
+                  if (parent) {
+                    console.log(`[CommerceService] Parent product fetched successfully`)
+                    const productName = parent.name || parent.shortDescription || parent.longDescription || ""
+                    const offerPrice = parent.price?.find((p: Record<string, unknown>) => p.usage === "Offer")
+                    const displayPrice = parent.price?.find((p: Record<string, unknown>) => p.usage === "Display")
+                    const price = offerPrice?.value || displayPrice?.value
+
+                    return {
+                      partNumber: parent.partNumber || partNumber,
+                      name: productName,
+                      brand: parent.manufacturer,
+                      price: price ? Number(price) : undefined,
+                      imageUrl: parent.thumbnail || parent.fullImage,
+                    }
+                  }
+                }
+              }
+            }
+
+            // No parent or couldn't fetch it, use the catalog entry itself
+            const productName = catalogEntry.name || catalogEntry.shortDescription || catalogEntry.longDescription || ""
+            const offerPrice = catalogEntry.price?.find((p: Record<string, unknown>) => p.usage === "Offer")
+            const displayPrice = catalogEntry.price?.find((p: Record<string, unknown>) => p.usage === "Display")
+            const price = offerPrice?.value || displayPrice?.value
+
+            return {
+              partNumber: catalogEntry.partNumber || partNumber,
+              name: productName,
+              brand: catalogEntry.manufacturer,
+              price: price ? Number(price) : undefined,
+              imageUrl: catalogEntry.thumbnail || catalogEntry.fullImage,
+            }
+          } else {
+            console.log(`[CommerceService] Endpoint ${endpoint} returned ${response.status}`)
+          }
+        }
+
+        console.warn(`[CommerceService] All productId endpoint variations failed`)
+      }
+
+      // Fallback: Search by partNumber
+      console.log(`[CommerceService] Searching by partNumber in search API: ${partNumber}`)
+      const config = this.client.getConfig()
+      const contractId = config.contractId || process.env.COMMERCE_CONTRACT_ID
+
+      const searchUrl = this.buildSearchUrl(
+        `/api/v2/products?storeId=${this.storeId}&catalogId=${catalogId}&contractId=${contractId}&langId=${langId}&currency=${currency}&partNumber=${encodeURIComponent(
+          partNumber,
+        )}`,
+      )
+
+      const response = await fetch(searchUrl, {
         method: "GET",
         headers,
         credentials: "include",
       })
 
-      // If session expired (401), re-authenticate and retry once
-      if (response.status === 401) {
-        console.warn("[CommerceService] Session expired (401), re-authenticating...")
-        this.initialized = false
-        await this.initialize()
+      if (response.ok) {
+        const data = await response.json()
+        console.log(`[CommerceService] Search response:`, JSON.stringify(data, null, 2))
 
-        const newTokens = this.client.getTokens()
-        if (newTokens.WCToken) {
-          headers["WCToken"] = newTokens.WCToken
+        const product = data.contents?.[0]
+        if (product) {
+          const productName = product.name || product.shortDescription || product.longDescription || ""
+          const offerPrice = product.price?.find((p: Record<string, unknown>) => p.usage === "Offer")
+          const displayPrice = product.price?.find((p: Record<string, unknown>) => p.usage === "Display")
+          const price = offerPrice?.value || displayPrice?.value
+
+          return {
+            partNumber: product.partNumber,
+            name: productName,
+            brand: product.manufacturer,
+            price: price ? Number(price) : undefined,
+            imageUrl: product.thumbnail || product.fullImage,
+          }
         }
-        if (newTokens.WCTrustedToken) {
-          headers["WCTrustedToken"] = newTokens.WCTrustedToken
-        }
-
-        response = await fetch(url, {
-          method: "GET",
-          headers,
-          credentials: "include",
-        })
       }
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error(`[CommerceService] Product API error: ${response.status} - ${errorText}`)
-        return null
-      }
-
-      const data = await response.json()
-      console.log(`[CommerceService] Product search response:`, JSON.stringify(data, null, 2))
-
-      const product = data.contents?.[0]
-
-      if (!product) {
-        console.log(`[CommerceService] Product ${partNumber} not found in search results`)
-        return null
-      }
-
-      // Extract price from price array
-      const offerPrice = product.price?.find((p: any) => p.usage === "Offer")
-      const displayPrice = product.price?.find((p: any) => p.usage === "Display")
-      const price = offerPrice?.value || displayPrice?.value
-
-      return {
-        partNumber: product.partNumber,
-        name: product.name,
-        brand: product.manufacturer,
-        price: price ? Number(price) : undefined,
-        imageUrl: product.thumbnail || product.fullImage,
-      }
+      console.log(`[CommerceService] Product ${partNumber} not found`)
+      return null
     } catch (error) {
       console.error(`[CommerceService] Failed to fetch product ${partNumber}:`, error)
       return null

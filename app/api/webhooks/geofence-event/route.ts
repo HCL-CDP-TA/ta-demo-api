@@ -63,6 +63,8 @@ export async function POST(request: NextRequest) {
     }
 
     const userName = [commerceUser.firstName, commerceUser.lastName].filter(Boolean).join(" ") || "there"
+    // Use logonId if available, otherwise fall back to original user_id
+    const userIdentifier = commerceUser.logonId || data.user_id
 
     // Log activity
     await activityService.logActivity(ActivityType.GEOFENCE_ENTRY, {
@@ -96,23 +98,42 @@ export async function POST(request: NextRequest) {
     // For testing: Just use first cart item regardless of stock
     const firstItem = cartItems[0]
     console.log(`[Geofence Webhook] Using first cart item (testing mode): ${firstItem.partNumber}`)
-
-    // 4. Cart items already contain all product details, no need for separate lookup
     console.log(`[Geofence Webhook] Cart item details:`, JSON.stringify(firstItem, null, 2))
+
+    // 4. If cart item doesn't have product name, fetch product details
+    let productName = firstItem.name
+    let productBrand = firstItem.manufacturer
+    let productPrice = firstItem.unitPrice
+    let productImageUrl = firstItem.thumbnail
+
+    if (!productName) {
+      console.log(`[Geofence Webhook] Cart item missing product name, fetching product details for ${firstItem.partNumber} (ID: ${firstItem.productId})`)
+      const productDetails = await commerceService.getProductByPartNumber(firstItem.partNumber, firstItem.productId)
+      if (productDetails) {
+        productName = productDetails.name
+        productBrand = productBrand || productDetails.brand
+        productPrice = productPrice || productDetails.price?.toString()
+        productImageUrl = productImageUrl || productDetails.imageUrl
+        console.log(`[Geofence Webhook] Fetched product details: ${productName}`)
+      } else {
+        console.warn(`[Geofence Webhook] Could not fetch product details for ${firstItem.partNumber}`)
+        productName = `Product ${firstItem.partNumber}`
+      }
+    }
 
     // 5. Send WhatsApp offer message (NO reservation created yet - that happens when user confirms)
     const result = await whatsappService.sendReservationMessage({
       phoneNumber: commerceUser.phone1,
       userName: userName,
-      productName: firstItem.name || `Product ${firstItem.partNumber}`,
+      productName,
       productPartNumber: firstItem.partNumber,
-      productBrand: firstItem.manufacturer,
-      productPrice: firstItem.unitPrice,
-      productImageUrl: firstItem.thumbnail,
+      productBrand,
+      productPrice,
+      productImageUrl,
       storeName: data.geofence.name,
       shoppingCentre: data.geofence.name,
       locationId: data.geofence.locationId,
-      userId: data.user_id,
+      userId: userIdentifier, // Use logonId for proper customer lookup
       geofenceEventData: {
         geofenceId: data.geofence.id,
         position: data.position,

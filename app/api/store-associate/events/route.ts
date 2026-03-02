@@ -4,6 +4,23 @@ import type { SSEClientFilters } from '@/lib/types/sse.types'
 
 export const dynamic = 'force-dynamic'
 
+// CORS headers for cross-origin SSE connections
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+}
+
+/**
+ * Handle CORS preflight requests
+ */
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: corsHeaders,
+  })
+}
+
 /**
  * SSE Stream for Store Associate App
  *
@@ -68,6 +85,7 @@ export async function GET(request: NextRequest) {
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no', // Disable nginx buffering
+      ...corsHeaders,
     }
   })
 }

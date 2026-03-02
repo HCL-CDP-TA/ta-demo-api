@@ -7,7 +7,6 @@ import { activityService } from "@/lib/services/activity.service"
 import { offerService } from "@/lib/services/offer.service"
 import { whatsappService } from "@/lib/services/whatsapp.service"
 import { ActivityType } from "@prisma/client"
-import { calculateETA } from "@/lib/utils/date.helpers"
 
 // Helper function to delay execution
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -94,17 +93,18 @@ export async function POST(request: NextRequest) {
       // Send TWO SSE events to store associate app
 
       // Event 1: Customer Approaching (for VipNotification)
-      // Simulate distance and ETA (in production, this would come from geofence data)
-      const distance = "500"
-      const eta = calculateETA(500).toString()
+      // Simulate ETA (in production, this would come from geofence data)
+      const eta = "10"
 
       sseService.sendCustomerApproaching({
         customerId: reservation.commerceUserId,
         customerName: reservation.userName || reservation.phoneNumber,
         phoneNumber: reservation.phoneNumber,
-        distance,
+        distance: "0", // Not displayed
         eta,
-        shoppingCentre: reservation.shoppingCentre,
+        heading: 'ITEM RESERVED',
+        message: `${reservation.userName || 'Customer'} reserved ${reservation.productName} and will arrive in approximately ${eta} minutes.`,
+        // Don't filter by shoppingCentre - send to all connected clients
       })
 
       await activityService.logActivity(ActivityType.SSE_EVENT_SENT, {
