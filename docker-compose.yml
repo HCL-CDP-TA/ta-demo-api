@@ -13,14 +13,18 @@ services:
     container_name: ta-demo-api
     restart: unless-stopped
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-3300}:3300"
     environment:
       - NODE_ENV=${NODE_ENV:-production}
-      - PORT=3000
+      - PORT=3300
       - DATABASE_URL=${DATABASE_URL}
 
       # Phone Emulator
       - PHONE_EMULATOR_URL=${PHONE_EMULATOR_URL:-http://host.docker.internal:3001}
+
+      # API Base URL
+      - API_BASE_URL=${API_BASE_URL:-}
+      - TA_DEMO_API_URL=${TA_DEMO_API_URL:-}
 
       # CDP Integration
       - CDP_ENDPOINT=${CDP_ENDPOINT:-https://crux.dev.hxcd.now.hclsoftware.cloud}
@@ -29,6 +33,20 @@ services:
 
       # Security
       - WEBHOOK_API_KEY=${WEBHOOK_API_KEY:-demo-webhook-secret-2025}
+
+      # HCL Commerce API
+      - COMMERCE_HOST_URL=${COMMERCE_HOST_URL:-}
+      - COMMERCE_STORE_HOST=${COMMERCE_STORE_HOST:-}
+      - COMMERCE_TRANSACTION_CONTEXT=${COMMERCE_TRANSACTION_CONTEXT:-/wcs/resources}
+      - COMMERCE_SEARCH_CONTEXT=${COMMERCE_SEARCH_CONTEXT:-/search/resources}
+      - COMMERCE_STORE_ID=${COMMERCE_STORE_ID:-41}
+      - COMMERCE_CATALOG_ID=${COMMERCE_CATALOG_ID:-11501}
+      - COMMERCE_CONTRACT_ID=${COMMERCE_CONTRACT_ID:--41005}
+      - COMMERCE_VERSION=${COMMERCE_VERSION:-commerce-9x}
+      - COMMERCE_STORE_NAME=${COMMERCE_STORE_NAME:-Ruby}
+      - COMMERCE_FULFILLMENT_CENTER=${COMMERCE_FULFILLMENT_CENTER:-R00B2C}
+      - COMMERCE_ADMIN_USER=${COMMERCE_ADMIN_USER:-}
+      - COMMERCE_ADMIN_PASSWORD=${COMMERCE_ADMIN_PASSWORD:-}
 
       # Business Rules
       - COB_TIME=${COB_TIME:-17:00}
@@ -48,7 +66,7 @@ services:
       - "environment=${ENVIRONMENT:-production}"
       - "version=${VERSION:-latest}"
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3300/"]
       interval: 30s
       timeout: 10s
       retries: 3

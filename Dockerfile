@@ -54,14 +54,14 @@ COPY --chmod=755 docker-entrypoint.sh /docker-entrypoint.sh
 
 # Set environment variables
 ENV NODE_ENV=production
-ENV PORT=3000
+ENV PORT=3300
 ENV HOSTNAME="0.0.0.0"
 
 # Add labels for metadata
 LABEL org.opencontainers.image.title="TA Demo API"
 LABEL org.opencontainers.image.description="Technical Architect Demo API for geofence-to-WhatsApp-to-reservation flow"
 
-EXPOSE 3000
+EXPOSE 3300
 
 USER nextjs
 
