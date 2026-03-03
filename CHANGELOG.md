@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/HCL-CDP-TA/ta-demo-api/compare/v1.0.0...v1.0.1) (2026-03-03)
+
+
+### Bug Fixes
+
+* deploy ([d342771](https://github.com/HCL-CDP-TA/ta-demo-api/commit/d342771c1a84fc8ad981210c57eb46f1e629a038))
+
 ## 1.0.0 (2026-03-03)
 
 
