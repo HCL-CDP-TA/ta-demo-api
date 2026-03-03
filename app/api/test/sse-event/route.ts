@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sseService } from '@/lib/services/sse.service'
+import { SSEEvent } from '@/lib/types/sse.types'
 
 /**
  * Test endpoint to manually trigger SSE events
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest) {
 
     if (type === 'customer_approaching') {
       // Send to ALL clients by not specifying filters
-      const event = {
+      const event: SSEEvent = {
         event: 'customer_approaching',
         data: {
           id: crypto.randomUUID(),
