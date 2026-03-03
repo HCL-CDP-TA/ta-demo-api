@@ -3,14 +3,25 @@
 # Builder stage
 FROM node:20-slim AS builder
 
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 COPY prisma ./prisma/
 
-# Install dependencies
-RUN npm ci
+# Rewrite GitHub SSH URLs to HTTPS in both package.json and package-lock.json
+RUN sed -i 's|git+ssh://git@github.com/|git+https://github.com/|g' package-lock.json && \
+    sed -i 's|"github:\([^"]*\)"|"https://github.com/\1"|g' package.json
+
+# Install dependencies (uses GITHUB_TOKEN for private repos)
+RUN --mount=type=secret,id=github_token \
+    if [ -f /run/secrets/github_token ]; then \
+        git config --global url."https://$(cat /run/secrets/github_token)@github.com/".insteadOf "https://github.com/"; \
+        git config --global url."https://$(cat /run/secrets/github_token)@github.com/".insteadOf "ssh://git@github.com/"; \
+    fi && \
+    npm ci
 
 # Generate Prisma client
 RUN npx prisma generate
