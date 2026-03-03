@@ -1,0 +1,24 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Also allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  repository-projects: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          # This tells release-please to look for a Node.js project
+          release-type: node
+          # Use personal access token instead of GITHUB_TOKEN
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
